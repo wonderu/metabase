@@ -64,6 +64,10 @@ function pickRowsToMeasure(rows, columnIndex, count = 10) {
   return rowIndexes;
 }
 
+function isUrlString(component) {
+  return component && typeof component === 'string' && component.startsWith('~~!!~~');
+}
+
 type Props = VisualizationProps & {
   width: number,
   height: number,
@@ -143,9 +147,15 @@ export default class TableInteractive extends Component {
     renderTableHeaderWrapper: children => (
       <div className="cellData">{children}</div>
     ),
-    renderTableCellWrapper: children => (
-      <div className="cellData">{children}</div>
-    ),
+    renderTableCellWrapper: children => {
+      if (isUrlString(children)) { 
+        const splitted=children.split("~~!!~~"); 
+        return React.createElement("div",{className:"cellData"},null,
+            React.createElement("a", {className:"link link--wrappable",href: splitted[1]},splitted[2])
+          );
+      }
+      return <div className="cellData">{children}</div>
+    },
   };
 
   componentWillMount() {
