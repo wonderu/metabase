@@ -320,16 +320,23 @@ function onRenderDisableClickFiltering(chart) {
     if (chart && chart.series && chart.series._raw && chart.series._raw.length > 0){
       const rows = chart.series._raw[0].data.rows;
       if (rows) {
-        const row =  rows.find(e => e[0] === d.data.key);
+        console.log('rows');
+        console.log(rows);
+        const row =  rows.find(e => e[0] === d.data.key || e[0] && e[0].toString() === d.data.key.toString());
         console.log('row');
         console.log(row);
         if (row){
-          const value = row.find(v => v && typeof v === 'string' && v.startsWith('~~!!~~'));
+          const value = row.find(v => v && v.toString().startsWith('~~!!~~'));
+          console.log('value');
+          console.log(value);
+
           if (value){
-            console.log('value');
-            console.log(value);
-          
-            document.location = value.split('~~!!~~')[1];
+            const url = value.split('~~!!~~')[1];
+            if (url.startsWith('#')){
+              document.location.hash = url;
+            } else {  
+              document.location = url;
+            }
           }
         }
       }
