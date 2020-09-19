@@ -315,6 +315,19 @@ function onRenderHideBadAxis(chart) {
 
 function onRenderDisableClickFiltering(chart) {
   chart.selectAll("rect.bar").on("click", d => {
+    if (chart && chart.series && chart.series._raw && chart.series._raw.length > 0){
+      const rows = chart.series._raw[0].data.rows;
+      if (rows) {
+        const row =  rows.find(e => e[0] === d.data.key);
+        if (row){
+          const value = row.find(v => v && typeof v === 'string' && v.startsWith('~~!!~~'));
+          if (value){
+            document.location = value.split('~~!!~~')[1];
+          }
+        }
+      }
+    }
+
     chart.filter(null);
     chart.filter(d.key);
   });
