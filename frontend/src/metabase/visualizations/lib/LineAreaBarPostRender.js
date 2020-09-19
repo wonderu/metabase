@@ -333,9 +333,9 @@ function onRenderDisableClickFiltering(chart) {
           if (value){
             const url = value.split('~~!!~~')[1];
             if (url.startsWith('#')){
-              document.location.hash = url;
+              top.window.location.hash = url;
             } else {  
-              document.location = url;
+              top.window.location.href = url;
             }
           }
         }
