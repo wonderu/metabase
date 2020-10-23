@@ -9,9 +9,9 @@
   of values happens on the frontend, so this middleware simply adds the column to be used for replacement (e.g.
   `category.name`) to the `:fields` clause in pre-processing, so the Field will be fetched. Recall that Fields
   referenced via with `:fk->` clauses imply that JOINs will take place, which are automatically handled later in the
-  Query Processor pipeline. Additionally, this middleware will swap out `:breakout` and `:order-by` clauses referencing the
-  original Field with ones referencing the remapped Field (for example, so we would sort by `category.name` instead of
-  `category_id`).
+  Query Processor pipeline. Additionally, this middleware will swap out `:breakout` and `:order-by` clauses
+  referencing the original Field with ones referencing the remapped Field (for example, so we would sort by
+  `category.name` instead of `category_id`).
 
   `internal` type Dimensions mean the Field's values are replaced by a user-defined map of values, stored in the
   `human_readable_values` column of a corresponding `FieldValues` object. A common use-case for this scenario would be
@@ -87,19 +87,22 @@
   the newly remapped column. This should order by the text of the remapped column vs. the id of the source column
   before the remapping"
   [field->remapped-col :- {mbql.s/field-id, mbql.s/fk->}, order-by-clauses :- [mbql.s/OrderBy]]
-  (vec
-   (for [[direction field, :as order-by-clause] order-by-clauses]
-     (if-let [remapped-col (get field->remapped-col field)]
-       [direction remapped-col]
-       order-by-clause))))
+  (->> (for [[direction field, :as order-by-clause] order-by-clauses]
+         (if-let [remapped-col (get field->remapped-col field)]
+           [direction remapped-col]
+           order-by-clause))
+       distinct
+       vec))
 
 (defn- update-remapped-breakout
   [field->remapped-col breakout-clause]
-  (vec (mapcat (fn [field]
-                 (if-let [remapped-col (get field->remapped-col field)]
-                   [remapped-col field]
-                   [field]))
-               breakout-clause)))
+  (->> breakout-clause
+       (mapcat (fn [field]
+              (if-let [remapped-col (get field->remapped-col field)]
+                [remapped-col field]
+                [field])))
+       distinct
+       vec))
 
 (s/defn ^:private add-fk-remaps :- [(s/one (s/maybe [ExternalRemappingDimension]) "external remapping dimensions")
                                     (s/one mbql.s/Query "query")]
@@ -114,7 +117,11 @@
     ;; fetch remapping column pairs if any exist...
     (if-let [remap-col-tuples (seq (create-remap-col-tuples (concat fields breakout)))]
       ;; if they do, update `:fields`, `:order-by` and `:breakout` clauses accordingly and add to the query
-      (let [new-fields          (into fields (map second) remap-col-tuples)
+      (let [new-fields          (->> remap-col-tuples
+                                     (map second)
+                                     (concat fields)
+                                     distinct
+                                     vec)
             ;; make a map of field-id-clause -> fk-clause from the tuples
             field->remapped-col (into {} (for [[field-clause fk-clause] remap-col-tuples]
                                            [field-clause fk-clause]))

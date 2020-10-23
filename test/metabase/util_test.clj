@@ -7,6 +7,16 @@
              [test :as mt]
              [util :as u]]))
 
+(deftest decolorize-test
+  (is (= "[31mmessage[0m"
+         (u/colorize 'red "message")))
+  (is (= "message"
+         (u/decolorize "[31mmessage[0m")))
+  (is (= "message"
+         (u/decolorize (u/colorize 'red "message"))))
+  (is (= nil
+         (u/decolorize nil))))
+
 (defn- are+-message [expr arglist args]
   (pr-str
    (second
@@ -68,6 +78,19 @@
     "http://"                                                                                false
     ;; nil .getAuthority needs to be handled or NullPointerException
     "http:/"                                                                                 false))
+
+(deftest state?-test
+  (are+ [s expected] (= expected
+                        (u/state? s))
+    "louisiana"      true
+    "north carolina" true
+    "WASHINGTON"     true
+    "CA"             true
+    "NY"             true
+    "random"         false
+    nil              false
+    3                false
+    (Object.)        false))
 
 (deftest qualified-name-test
   (are+ [k expected] (= expected

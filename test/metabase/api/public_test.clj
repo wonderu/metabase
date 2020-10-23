@@ -10,7 +10,9 @@
              [models :refer [Card Collection Dashboard DashboardCard DashboardCardSeries Dimension Field FieldValues]]
              [test :as mt]
              [util :as u]]
-            [metabase.api.public :as public-api]
+            [metabase.api
+             [dashboard-test :as dashboard-api-test]
+             [public :as public-api]]
             [metabase.models
              [permissions :as perms]
              [permissions-group :as group]]
@@ -150,16 +152,16 @@
 
         (testing ":json download response format"
           (is (= [{:Count 100}]
-                 (http/client :get 202 (str "public/card/" uuid "/query/json")))))
+                 (http/client :get 200 (str "public/card/" uuid "/query/json")))))
 
         (testing ":csv download response format"
           (is (= "Count\n100\n"
-                 (http/client :get 202 (str "public/card/" uuid "/query/csv"), :format :csv))))
+                 (http/client :get 200 (str "public/card/" uuid "/query/csv"), :format :csv))))
 
         (testing ":xlsx download response format"
           (is (= [{:col "Count"} {:col 100.0}]
                  (parse-xlsx-response
-                  (http/client :get 202 (str "public/card/" uuid "/query/xlsx") {:request-options {:as :byte-array}})))))))))
+                  (http/client :get 200 (str "public/card/" uuid "/query/xlsx") {:request-options {:as :byte-array}})))))))))
 
 (deftest execute-public-card-as-user-without-perms-test
   (testing "A user that doesn't have permissions to run the query normally should still be able to run a public Card as if they weren't logged in"
@@ -234,7 +236,7 @@
   (mt/with-temporary-setting-values [enable-public-sharing true]
     (mt/with-temp Card [{uuid :public_uuid} (card-with-date-field-filter)]
       (is (= "count\n107\n"
-             (http/client :get 202 (str "public/card/" uuid "/query/csv")
+             (http/client :get 200 (str "public/card/" uuid "/query/csv")
                           :parameters (json/encode [{:type   :date/quarter-year
                                                      :target [:dimension [:template-tag :date]]
                                                      :value  "Q1-2014"}])))))))
@@ -247,7 +249,7 @@
       (binding [http/*url-prefix* (str/replace http/*url-prefix* #"/api/$" "/")]
         (mt/with-temporary-setting-values [site-url http/*url-prefix*]
           (is (= "count\n107\n"
-                 (http/client :get 202 (str "public/question/" uuid ".csv")
+                 (http/client :get 200 (str "public/question/" uuid ".csv")
                               :parameters (json/encode [{:type   :date/quarter-year
                                                          :target [:dimension [:template-tag :date]]
                                                          :value  "Q1-2014"}])))))))))
@@ -960,26 +962,61 @@
 
 
 (deftest api-endpoint-should-return-same-results-as-function
-  (is (= [10 "Fred 62"]
-         (with-sharing-enabled-and-temp-dashcard-referencing :venues :id [dashboard]
+  (with-sharing-enabled-and-temp-dashcard-referencing :venues :id [dashboard]
+    (is (= [10 "Fred 62"]
            (http/client :get 200 (field-remapping-url dashboard (mt/id :venues :id) (mt/id :venues :name))
                         :value "10")))))
 
 (deftest field-remapping-shouldn-t-work-if-card-doesn-t-reference-the-field-in-question
-  (is (= "An error occurred."
-         (with-sharing-enabled-and-temp-dashcard-referencing :venues :price [dashboard]
+  (with-sharing-enabled-and-temp-dashcard-referencing :venues :price [dashboard]
+    (is (= "An error occurred."
            (http/client :get 400 (field-remapping-url dashboard (mt/id :venues :id) (mt/id :venues :name))
                         :value "10")))))
 
 (deftest remapping-or-if-the-remapping-field-isn-t-allowed-to-be-used-with-the-other-field
-  (is (= "An error occurred."
-         (with-sharing-enabled-and-temp-dashcard-referencing :venues :id [dashboard]
+  (with-sharing-enabled-and-temp-dashcard-referencing :venues :id [dashboard]
+    (is (= "An error occurred."
            (http/client :get 400 (field-remapping-url dashboard (mt/id :venues :id) (mt/id :venues :price))
                         :value "10")))))
 
 (deftest remapping-or-if-public-sharing-is-disabled
-  (is (= "An error occurred."
-         (with-sharing-enabled-and-temp-dashcard-referencing :venues :id [dashboard]
-           (mt/with-temporary-setting-values [enable-public-sharing false]
+  (with-sharing-enabled-and-temp-dashcard-referencing :venues :id [dashboard]
+    (mt/with-temporary-setting-values [enable-public-sharing false]
+      (is (= "An error occurred."
              (http/client :get 400 (field-remapping-url dashboard (mt/id :venues :id) (mt/id :venues :name))
                           :value "10"))))))
+
+;;; --------------------------------------------- Chain filter endpoints ---------------------------------------------
+
+(deftest chain-filter-test
+  (mt/with-temporary-setting-values [enable-public-sharing true]
+    (dashboard-api-test/with-chain-filter-fixtures [{:keys [dashboard param-keys]}]
+      (let [uuid (str (UUID/randomUUID))]
+        (is (= true
+               (db/update! Dashboard (u/get-id dashboard) :public_uuid uuid)))
+        (testing "GET /api/public/dashboard/:uuid/params/:param-key/values"
+          (let [url (format "public/dashboard/%s/params/%s/values" uuid (:category-id param-keys))]
+            (is (= [2 3 4 5 6]
+                   (take 5 (http/client :get 200 url))))))
+        (testing "GET /api/public/dashboard/:uuid/params/:param-key/search/:prefix"
+          (let [url (format "public/dashboard/%s/params/%s/search/s" uuid (:category-name param-keys))]
+            (is (= ["Scandinavian" "Seafood" "South Pacific"]
+                   (take 3 (http/client :get 200 url))))))))))
+
+(deftest chain-filter-ignore-current-user-permissions-test
+  (testing "Should not fail if request is authenticated but current user does not have data permissions"
+    (mt/with-temp-copy-of-db
+      (perms/revoke-permissions! (group/all-users) (mt/db))
+      (mt/with-temporary-setting-values [enable-public-sharing true]
+        (dashboard-api-test/with-chain-filter-fixtures [{:keys [dashboard param-keys]}]
+          (let [uuid (str (UUID/randomUUID))]
+            (is (= true
+                   (db/update! Dashboard (u/get-id dashboard) :public_uuid uuid)))
+            (testing "GET /api/public/dashboard/:uuid/params/:param-key/values"
+              (let [url (format "public/dashboard/%s/params/%s/values" uuid (:category-id param-keys))]
+                (is (= [2 3 4 5 6]
+                       (take 5 ((mt/user->client :rasta) :get 200 url))))))
+            (testing "GET /api/public/dashboard/:uuid/params/:param-key/search/:prefix"
+              (let [url (format "public/dashboard/%s/params/%s/search/s" uuid (:category-name param-keys))]
+                (is (= ["Scandinavian" "Seafood" "South Pacific"]
+                       (take 3 ((mt/user->client :rasta) :get 200 url))))))))))))
